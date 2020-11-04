@@ -18,3 +18,5 @@ lowest tier and be served more frequently. The interval in this version is hard-
 algorithm.
 
 Cards can be edited or deleted as well.
+
+Readme change

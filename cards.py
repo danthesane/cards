@@ -5,7 +5,7 @@ A spaced-repetition flashcard system in which users create flashcards from a
 simple command-line interface that will be served back to them at an algorithmically
 determined rate, helping to boost recall of information that the user is studying.
 Flashcards will be sorted depending on keywords that determine how they are stored
-and served. In the future, can choose which system's algorithm. Will start with Leitner and Pimsleur for simplicity.
+and served. In the future, can choose which system's algorithm. Will start Pimsleur for simplicity.
 """
 # TODO: Write unit tests to make sure each function is working properly
 import sys, shelve, logging, time, random
@@ -21,6 +21,7 @@ TODO: Shuffle function. shuffle card times randomly while staying within their t
 TODO: have cardfile be passed to all functions as default cardfile CARDFILE.
 """
 LEVELS = [5, 25, 120, 600, 3600, 18000, 86400, 432000, 2160000, 10368000, 63072000]
+FORBIDDEN_MAGICKS = ["lastTopic"]
 """
 Cards are stored in dict format for easy use in shelve. Each card entry will be a list of
 four things: question, answer, timestamp of the last time it was accessed, and recall level.
@@ -36,24 +37,36 @@ class Card:
         self.time = cardList[2]
         self.level = cardList[3]
         self.card = cardList
-        topicList = cardFile[topic]
-        self.index = topicList.index(cardList)
+        try:
+            topicList = cardFile[topic]
+        except:
+            topicList = []
+        try:
+            self.index = topicList.index(cardList)
+        except:
+            self.index = len(topicList)
         self.topic = topic
         cardFile.close()
     def save(self): # Updates cardfile entry by inserting the new information at the correct index, then deleting the old one (located one index further)
         cardFile = shelve.open(CARDFILE)
         saveCard = [self.question,self.answer,self.time,self.level]
-        topicList = cardFile[self.topic]
+        try:
+            topicList = cardFile[self.topic]
+        except:
+            topicList = []
         topicList.insert(self.index, saveCard)
-        elToDel = self.index + 1  # index of Element To Delete
-        del topicList[elToDel]
+        if self.index != len(topicList)-1: # Since the new data has already been added to the list, this will be the case only if the card is new
+            elementToDel = self.index + 1  # index of Element To Delete
+            del topicList[elementToDel]
         cardFile[self.topic] = topicList
+        cardFile['lastTopic'] = self.topic
         cardFile.close()
         return
     def edit(self):
         userInput = prompt_for_input("Would you like to edit the [q]uestion, [a]nswer, or [t]opic?")
         if userInput == 'q' or userInput == 'a':
             finished = 0
+            cardIndex = 0
             if userInput == 'q':
                 cardIndex = 0
                 noun = "question"
@@ -66,11 +79,13 @@ class Card:
                 print("The new %s is as follows:\n\n%s\n" % (noun, newEntry))
                 if confirmation_input("Is this good?", defaultAns=1):
                     if cardIndex == 0:
-                        self.question == newEntry
+                        self.question = newEntry
                     elif cardIndex == 1:
-                        self.answer == newEntry
+                        self.answer = newEntry
                     finished = 1
             self.save()
+            print("Saved.")
+            self.display()
 
         elif userInput == 't':
             print("You can't do that yet.")
@@ -84,6 +99,9 @@ class Card:
         ListContainingTheCardToDelete = cardFile[self.topic]
         del ListContainingTheCardToDelete[self.index]
         cardFile[self.topic] = ListContainingTheCardToDelete
+        if len(cardFile[self.topic]) == 0:
+            print("That was the last card in its topic. Removing topic from deck.")
+            cardFile.pop(self.topic, None)
         cardFile.close()
         logging.info("Card removed from cardfile, and deleting itself.")
         del self
@@ -265,20 +283,31 @@ def insert_card_in_cardfile(topic, card, cardFile):
     logging.debug("Before cardfile is closed, keys are: %s" %list(cardFile.keys()))
 def add_card_loop(cardFile): # Adds a new card to the file. Accepts open card file as argument.
     finished = False
+    def print_input_to_verify(response_list):
+        print("Topic: " + response_list[2])
+        print("Question: " + response_list[0])
+        print("Answer: " + response_list[1])
+    i = 0
+    list_of_user_responses = []
+    print("Type 'quit' in any field to quit.")
     while not finished:
-        question = prompt_for_input('What is the question?') # First inquire for question and answer
-        answer = prompt_for_input('What is the answer? Be specific.')
-        list_of_topics = get_list_of_topics(cardFile)
-        topic = input_or_choose_topic(list_of_topics)
-        curTime = time.time() # get current time
-        cardData = [question, answer, curTime, 0] # This makes up the card's data
-        thisCard = Card(cardData, topic)
-        thisCard.display()
-        if confirmation_input('Does that look good?', defaultAns=1): # confirm that the flash cardFile are as intended
-            thisCard.save()
-            print('Card saved.')
-            return
-        del thisCard # If user is not happy, del and make a new card object on the next loop.
+
+        prompts = ["What is the question?","What is the answer? Be specific."]
+        if i < 2:
+            list_of_user_responses.append(prompt_for_input(prompts[i]))
+        elif i == 2:
+            list_of_topics = get_list_of_topics(cardFile)
+            list_of_user_responses.append(input_or_choose_topic(list_of_topics))
+        else:
+            print_input_to_verify(list_of_user_responses)
+            if confirmation_input('Does that look good?', defaultAns=1): # confirm that the flash cardFile are as intended
+                topic, question, answer = list_of_user_responses[2], list_of_user_responses[0], list_of_user_responses[1]
+                return topic, question, answer
+        if list_of_user_responses[i].lower() == 'quit':
+            print("Quitting.")
+            return False, False, False
+        i += 1
+
 def review_cards(cards, cardsToServe): # pass it an open data file and a list of keys
     numLeft = len(cardsToServe) # numLeft will keep track of how many cards are left to go.
     if numLeft != 1: # can't shuffle one card.
@@ -407,6 +436,8 @@ def poll_for_review(cards): # Checks card file to see if any cards need review a
     else:
         cardsToServe.append("nocards")
         return cardsToServe
+def quit_by_magick():
+    raise ValueError("You may not speak the hallowed words of the ancient magicks. This topic is disallowed")
 def print_usage(): # prints list of available usage commands
     print("Cards v0.4 by Dan\n")
     print("cards          - Check for and begin a card review.")
@@ -417,6 +448,10 @@ def print_usage(): # prints list of available usage commands
     print("cards poll     - Checks if you have cards to review.")
     print("cards help     - View this list.")
     print("\nReview often for maximum learning power.")
+def card_input_verified_as_valid(topic, question, answer):
+    # TODO
+    return True
+
 
 if len(args) == 1: # No arguments provided
     print("Cards v0.4 by Dan\nUse 'cards help' to view usage.\n")
@@ -443,14 +478,50 @@ if len(args) == 1: # No arguments provided
 
 elif len(args) > 1: # Parse those arguments!
     if args[1] == 'add':
+        # syntax is 'cards add topic question answer' or optionally 'cards add question answer'
+        # The latter will use the last-used 'topic' if one exists, or else 'No topic'
+
+        lastTopic = ""
+        topic, question, answer = "", "", ""
+
         cards = shelve.open(CARDFILE)
         try:
-            testVar = cards['lastTopic']
+            lastTopic = cards['lastTopic']
             logging.debug("Detected that a last topic exists.")
         except:
-            cards['lastTopic'] = ''
-        add_card_loop(cards) # Add a card to the catalogue
-        cards.close()
+            lastTopic = 'No topic'
+            cards['lastTopic'] = lastTopic
+        if len(args) == 2:  # If there are no other arguments than 'add', begin the assisted card loop
+            topic, question, answer = add_card_loop(cards)
+
+        elif len(args) == 3:
+            print("Not enough arguments.")  #TODO: usage info here
+        elif len(args) == 4:
+            topic = lastTopic
+            question = args[2]
+            answer = args[3]
+        elif len(args) == 5:
+            topic = args[2]
+            question = args[3]
+            answer = args[4]
+            logging.debug("Topic: %s| Question: %s| Answer: |%s" % (topic, question, answer))
+        else:
+            print("Too many arguments!") #TODO: usage here too
+
+        if answer:  # indicating add_card_loop hasn't been quit and there are minimum arguments to proceed
+            curTime = time.time() # get current time
+
+            if card_input_verified_as_valid(topic, question, answer):
+                cardData = [question, answer, curTime, 0] # This makes up the card's data
+                thisCard = Card(cardData, topic)
+
+                if topic in FORBIDDEN_MAGICKS:  # Just in case there are tricksters afoot. Put this in validation function
+                    quit_by_magick()
+
+                thisCard.save()
+                cards.close()
+                print("Card added successfully.")
+
     elif args[1] == 'list':
         pass #  # Nothing yet
     elif args[1] == 'clear':
@@ -472,8 +543,8 @@ elif len(args) > 1: # Parse those arguments!
             print(topic)
     elif args[1] == 'view': # View cards, sorted by topic.
         finished = 0
-        cardFile = shelve.open(CARDFILE)
         while finished == 0:
+            cardFile = shelve.open(CARDFILE)
             topics = get_list_of_topics(cardFile)
             logging.debug("List of topics: %s" %topics)
             topicIndices = list_topic_choices(topics)
@@ -485,11 +556,12 @@ elif len(args) > 1: # Parse those arguments!
                 topic = topics[int(chosenIndex)]
                 logging.info("Topic chosen: %s" %topic)
                 view_cards(topic)
+            cardFile.close()
             if finished == 0:
                 if not confirmation_input('Would you like to view another card?', defaultAns=1):
                     print("Card view complete.")
                     finished = 1
-        cardFile.close()
+
 
     elif args[1] == 'poll': # Poll for review without asking if the user would like to
         cards = shelve.open(CARDFILE)
